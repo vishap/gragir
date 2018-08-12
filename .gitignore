@@ -102,3 +102,5 @@ ENV/
 
 # smaple files
 samples/*.zip
+temp/*
+test_out/*
