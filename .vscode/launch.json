@@ -1,0 +1,48 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/gragir/__main__.py",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/modules/ebooklib"
+            },
+            "args": [
+                "samples/algorithms_third_edition_in_c.zip",
+                "test_out/algorithms_third_edition_in_c.epub"
+            ]
+        },
+        {
+            "name": "Python: Terminal (integrated)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/gragir/__main__.py",
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/modules/ebooklib"
+            },
+        },
+        {
+            "name": "Python: All debug Options",
+            "type": "python",
+            "request": "launch",
+            "pythonPath": "${config:python.pythonPath}",
+            "program": "${file}",
+            "module": "module.name",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/modules/ebooklib",
+                "VAR2": "2"
+            },
+            "envFile": "${workspaceFolder}/.env",
+            "args": [
+                "arg1",
+                "arg2"
+            ],
+            "debugOptions": [
+                "RedirectOutput"
+            ]
+        }
+    ]
+}
