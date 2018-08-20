@@ -17,6 +17,7 @@ import argparse
 import zipfile
 import email
 
+import urllib.parse as urlparse
 import ebooklib.epub as ebooklib
 from bs4 import BeautifulSoup
 
@@ -36,19 +37,38 @@ def parseArguments():
 
     return args
 
+def configLogger(args):
+    loggingLevel = logging.DEBUG if args.debug \
+                        else logging.INFO if args.verbose \
+                            else logging.WARNING
+    # logging.basicConfig(
+    #     format='%(asctime)s %(levelname)s: %(name)s - %(message)s',
+    #     level=loggingLevel)
+    logging.basicConfig(
+        format='%(message)s',
+        level=loggingLevel)
+
 
 def validateMht(fileName):
     return True
 
 class Item(object):
 
-    def __init__(self, file_name, content_type, payload):
-        self.file_name = file_name
+    def __init__(self, url, content_type, payload):
+        self.url = url
         self.content_type = content_type
         self.payload = payload
+        self.needed_by = set()
+        self.needs = set()
 
+class Book(object):
 
-def parseMht(mht, content):
+    def __init__(self, file_name):
+        self.file_name = file_name
+        self.content = {}
+        self.first = None
+
+def parseMht(mht, book):
     logger = logging.getLogger(__name__)
 
     mhtContent = email.message_from_bytes(mht)
@@ -70,10 +90,10 @@ def parseMht(mht, content):
             logger.info('       Content type: {}, Location: {}, Size: {}'
                         .format(ct, fp, len(p.get_payload())))
 
-            content[fp] = Item(fp, ct, p.get_payload(decode=True))
+            book.content[fp] = Item(fp, ct, p.get_payload(decode=True))
 
 
-def parseMhtFile(zip, mhtInfo, content):
+def parseMhtFile(zip, mhtInfo, book):
     logger = logging.getLogger(__name__)
     logger.info('Parsing {}, size: {}, csize: {} '
                 .format(mhtInfo.filename,
@@ -81,37 +101,120 @@ def parseMhtFile(zip, mhtInfo, content):
                         mhtInfo.compress_size))
 
     with zip.open(mhtInfo) as mht:
-        parseMht(mht.read(), content)
+        parseMht(mht.read(), book)
 
 
-def parseZipFile(zip, content):
+def parseZipFile(zip, book):
     logger = logging.getLogger(__name__)
     for zipMember in zip.infolist():
         if validateMht(zipMember):
-            parseMhtFile(zip, zipMember, content)
+            parseMhtFile(zip, zipMember, book)
         else:
-            pass
+            logger.error("Unexpected file in zip: {}".format(zipMember))
+            raise Exception("Unexpected file in zip.")
 
-def enrichContent(content):
+
+def parseHtml(book):
     logger = logging.getLogger(__name__)
-    logger.info("Loaded {} parts.".format(len(content)))
-    for item in content.values():
-        logger.info("Enriching {} {}".format(item.content_type, item.file_name))
+    logger.info("Loaded {} parts.".format(len(book.content)))
+    for item in book.content.values():
+        logger.info("Enriching {} {}".format(item.content_type, item.url))
         if item.content_type == 'text/html':
             item.soup = BeautifulSoup(item.payload, "lxml")
+            if hasattr(item.soup, 'title') and item.soup.title:
+                item.title = item.soup.title.string
+            else:
+                logger.info("No title for {}".format(item.url))
+
+
+def createDAG(book):
+    logger = logging.getLogger(__name__)
+    for item in book.content.values():
+        if hasattr(item, 'soup'):
+            if hasattr(item.soup, 'title') and item.soup.title:
+                logger.info("Title {}".format(item.soup.title.string))
+            else:
+                logger.info("No title for {}".format(item.url))
+
+            links = item.soup.find_all('a')
+            for link in links:
+                href = link.get('href')
+                if not href:
+                    continue
+                parsed_href = urlparse.urlsplit(href)
+                url = \
+                    urlparse.SplitResult(parsed_href.scheme,
+                                         parsed_href.netloc,
+                                         parsed_href.path,
+                                         parsed_href.query,
+                                         None).geturl()
+
+                if url in book.content:
+                    book.content[url].needed_by.add(item.url)
+                    item.needs.add(url)
+                elif href:
+                    logger.info("   refered but no item exist: {}".format(url))
+
+            # Try to get prev chapter.
+            links = item.soup.find_all('a', attrs={"class": "prev nav-link"})
+            if len(links):
+                item.prev = links[0].get('href')
+
+            # Try to get next chapter.
+            links = item.soup.find_all('a', attrs={"class": "next nav-link"})
+            if len(links):
+                item.next = links[0].get('href')
+
+            # Try to find content.
+            item_content = item.soup.find_all('div', attrs={"id": "sbo-rt-content"})
+            if len(item_content) == 1:
+                item.content = item_content[0]
+            else:
+                logger.error("No content found: {}".format(item.url))
+                item.remove = True
+
+    for item in book.content.values():
+        if hasattr(item, 'soup') \
+            and not hasattr(item, 'prev') \
+            and not hasattr(item, 'remove'):
+            if book.first:
+                logger.error("Multiple begin points found. {} and {}"
+                             .format(it.url, item.url))
+                raise Exception("Multiple begin points found.")
+            else:
+                book.first = item
+
+    for item in book.content.values():
+        logger.info("Item: {}".format(item.url))
+        if hasattr(item, 'prev'):
+            logger.info("   Prev: {}".format(item.prev))
+        if hasattr(item, 'next'):
+            logger.info("   Next: {}".format(item.next))
+        for url in item.needs:
+            logger.info("   Needs: {}".format(url))
+
 
     # for name in content.keys():
 
-def configLogger(args):
-    loggingLevel = logging.DEBUG if args.debug \
-                        else logging.INFO if args.verbose \
-                            else logging.WARNING
-    logging.basicConfig(
-        format='%(asctime)s %(levelname)s: %(name)s - %(message)s',
-        level=loggingLevel)
+def createEpubHtml(item):
+    html = ebooklib.EpubHtml()
+    return html
 
-def createEpubBook(content):
-    book = ebooklib.EpubBook()
+def createEpubBook(book):
+    logger = logging.getLogger(__name__)
+
+    ebook = ebooklib.EpubBook()
+
+    it = book.first
+    while it:
+        if it.content_type == 'text/html':
+            html = createEpubHtml(it)
+            ebook.add_item(html)
+        elif it.content_type == 'image/html':
+            html = createEpubHtml(it)
+            ebook.add_item(html)
+        
+    writeEpubBook(book.file_name, ebook)
 
     #     class EpubImage(EpubItem):
     #     class EpubNav(EpubHtml):
@@ -249,14 +352,14 @@ def main():
     logger = logging.getLogger(__name__)
     logger.info("Parsing {}.".format(args.zip))
 
-    content = {}
+    book = Book(args.epub)
 
     with zipfile.ZipFile(args.zip, 'r') as zip:
-        parseZipFile(zip, content)
+        parseZipFile(zip, book)
 
-    enrichContent(content)
-    book = createEpubBook(content)
-    writeEpubBook(args.epub, book)
+    parseHtml(book)
+    createDAG(book)
+    createEpubBook(book)
 
 
 if __name__ == "__main__":
