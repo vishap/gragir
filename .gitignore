@@ -104,3 +104,4 @@ ENV/
 samples/*.zip
 temp/*
 test_out/*
+.vscode/gragir..code-workspace
