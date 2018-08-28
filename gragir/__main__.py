@@ -14,12 +14,12 @@ import sys
 import logging
 import argparse
 
-import zipfile
-import email
-
 import urllib.parse as urlparse
 import ebooklib.epub as ebooklib
 from bs4 import BeautifulSoup
+
+from book import Book, Item
+from parse_mhtml import parseMhtmlZipFile
 
 def parseArguments():
     """
@@ -47,72 +47,6 @@ def configLogger(args):
     logging.basicConfig(
         format='%(message)s',
         level=loggingLevel)
-
-
-def validateMht(fileName):
-    return True
-
-class Item(object):
-
-    def __init__(self, url, content_type, payload):
-        self.url = url
-        self.content_type = content_type
-        self.payload = payload
-        self.needed_by = set()
-        self.needs = set()
-
-class Book(object):
-
-    def __init__(self, file_name):
-        self.file_name = file_name
-        self.content = {}
-        self.first = None
-
-def parseMht(mht, book):
-    logger = logging.getLogger(__name__)
-
-    mhtContent = email.message_from_bytes(mht)
-
-    parts = mhtContent.get_payload()
-    # Multiple parts, usually? If single 'str' part, then convert to a list.
-    if not type(parts) is list: 
-        parts = [mhtContent] 
-
-    logger.info('   Number of parts: {}'.format(len(parts)))
-
-    # Save all parts to files.
-    for p in parts: # walk() for a tree, but I'm guessing MHT is never nested?
-            #??? cs = p.get_charset() # Expecting "utf-8" for root HTML, None for all other parts.						
-            ct = p.get_content_type()
-                 # String coerced to lower case of the form maintype/subtype, else get_default_type().			
-            fp = p.get("content-location") or "index.html" # File path. Expecting root HTML is only part with no location.
-
-            logger.info('       Content type: {}, Location: {}, Size: {}'
-                        .format(ct, fp, len(p.get_payload())))
-
-            book.content[fp] = Item(fp, ct, p.get_payload(decode=True))
-
-
-def parseMhtFile(zip, mhtInfo, book):
-    logger = logging.getLogger(__name__)
-    logger.info('Parsing {}, size: {}, csize: {} '
-                .format(mhtInfo.filename,
-                        mhtInfo.file_size, 
-                        mhtInfo.compress_size))
-
-    with zip.open(mhtInfo) as mht:
-        parseMht(mht.read(), book)
-
-
-def parseZipFile(zip, book):
-    logger = logging.getLogger(__name__)
-    for zipMember in zip.infolist():
-        if validateMht(zipMember):
-            parseMhtFile(zip, zipMember, book)
-        else:
-            logger.error("Unexpected file in zip: {}".format(zipMember))
-            raise Exception("Unexpected file in zip.")
-
 
 def parseHtml(book):
     logger = logging.getLogger(__name__)
@@ -354,12 +288,10 @@ def main():
 
     book = Book(args.epub)
 
-    with zipfile.ZipFile(args.zip, 'r') as zip:
-        parseZipFile(zip, book)
-
+    parseMhtmlZipFile(args.zip, book)
     parseHtml(book)
     createDAG(book)
-    createEpubBook(book)
+    #createEpubBook(book)
 
 
 if __name__ == "__main__":
