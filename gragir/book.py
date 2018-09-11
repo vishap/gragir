@@ -10,6 +10,7 @@ class Item(object):
         self.payload = payload
         self.needed_by = set()
         self.needs = set()
+        self.soup = None
 
 class Book(object):
 

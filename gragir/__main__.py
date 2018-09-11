@@ -14,12 +14,11 @@ import sys
 import logging
 import argparse
 
-import urllib.parse as urlparse
 import ebooklib.epub as ebooklib
-from bs4 import BeautifulSoup
 
 from book import Book, Item
 from parse_mhtml import parseMhtmlZipFile
+from enrich_html import EnrichHtml
 
 def parseArguments():
     """
@@ -48,84 +47,6 @@ def configLogger(args):
         format='%(message)s',
         level=loggingLevel)
 
-def parseHtml(book):
-    logger = logging.getLogger(__name__)
-    logger.info("Loaded {} parts.".format(len(book.content)))
-    for item in book.content.values():
-        logger.info("Enriching {} {}".format(item.content_type, item.url))
-        if item.content_type == 'text/html':
-            item.soup = BeautifulSoup(item.payload, "lxml")
-            if hasattr(item.soup, 'title') and item.soup.title:
-                item.title = item.soup.title.string
-            else:
-                logger.info("No title for {}".format(item.url))
-
-
-def createDAG(book):
-    logger = logging.getLogger(__name__)
-    for item in book.content.values():
-        if hasattr(item, 'soup'):
-            if hasattr(item.soup, 'title') and item.soup.title:
-                logger.info("Title {}".format(item.soup.title.string))
-            else:
-                logger.info("No title for {}".format(item.url))
-
-            links = item.soup.find_all('a')
-            for link in links:
-                href = link.get('href')
-                if not href:
-                    continue
-                parsed_href = urlparse.urlsplit(href)
-                url = \
-                    urlparse.SplitResult(parsed_href.scheme,
-                                         parsed_href.netloc,
-                                         parsed_href.path,
-                                         parsed_href.query,
-                                         None).geturl()
-
-                if url in book.content:
-                    book.content[url].needed_by.add(item.url)
-                    item.needs.add(url)
-                elif href:
-                    logger.info("   refered but no item exist: {}".format(url))
-
-            # Try to get prev chapter.
-            links = item.soup.find_all('a', attrs={"class": "prev nav-link"})
-            if len(links):
-                item.prev = links[0].get('href')
-
-            # Try to get next chapter.
-            links = item.soup.find_all('a', attrs={"class": "next nav-link"})
-            if len(links):
-                item.next = links[0].get('href')
-
-            # Try to find content.
-            item_content = item.soup.find_all('div', attrs={"id": "sbo-rt-content"})
-            if len(item_content) == 1:
-                item.content = item_content[0]
-            else:
-                logger.error("No content found: {}".format(item.url))
-                item.remove = True
-
-    for item in book.content.values():
-        if hasattr(item, 'soup') \
-            and not hasattr(item, 'prev') \
-            and not hasattr(item, 'remove'):
-            if book.first:
-                logger.error("Multiple begin points found. {} and {}"
-                             .format(it.url, item.url))
-                raise Exception("Multiple begin points found.")
-            else:
-                book.first = item
-
-    for item in book.content.values():
-        logger.info("Item: {}".format(item.url))
-        if hasattr(item, 'prev'):
-            logger.info("   Prev: {}".format(item.prev))
-        if hasattr(item, 'next'):
-            logger.info("   Next: {}".format(item.next))
-        for url in item.needs:
-            logger.info("   Needs: {}".format(url))
 
 
     # for name in content.keys():
@@ -289,8 +210,8 @@ def main():
     book = Book(args.epub)
 
     parseMhtmlZipFile(args.zip, book)
-    parseHtml(book)
-    createDAG(book)
+    EnrichHtml.enrich(book)
+    #createDAG(book)
     #createEpubBook(book)
 
 
