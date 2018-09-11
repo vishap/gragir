@@ -104,5 +104,10 @@ ENV/
 samples/*.zip
 temp/*
 test_out/*
+<<<<<<< HEAD
 .vscode/gragir.code-workspace
 gragir.7z
+||||||| merged common ancestors
+=======
+.vscode/gragir..code-workspace
+>>>>>>> e75fd39a62122b51fe018cdc4bab7100a4d1208f
