@@ -19,6 +19,7 @@ import ebooklib.epub as ebooklib
 from book import Book, Item
 from parse_mhtml import parseMhtmlZipFile
 from enrich_html import EnrichHtml
+from prepare_epub import PrepareEpub
 
 def parseArguments():
     """
@@ -46,6 +47,15 @@ def configLogger(args):
     logging.basicConfig(
         format='%(message)s',
         level=loggingLevel)
+    
+
+    fh = logging.FileHandler('gragir.log', mode='w')
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(fmt=logging.Formatter(fmt='%(asctime)s %(levelname)s: %(name)s - %(message)s'))
+    #, datefmt='%H:%M:%S'
+    #'%(asctime)s %(levelname)s: %(name)s - %(message)s')
+    logger = logging.getLogger()
+    logger.addHandler(fh)
 
 
 
@@ -211,6 +221,8 @@ def main():
 
     parseMhtmlZipFile(args.zip, book)
     EnrichHtml.enrich(book)
+    PrepareEpub.prepare(book)
+    book.save_in_dir('test_out/test_save')
     #createDAG(book)
     #createEpubBook(book)
 

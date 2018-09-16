@@ -1,3 +1,4 @@
+import os
 import logging
 import urllib.parse as urlparse
 from bs4 import BeautifulSoup
@@ -5,32 +6,83 @@ from bs4 import BeautifulSoup
 from book import Item, Book
 
 
-class EnrichHtml(object):
+class PrepareEpub(object):
 
     @classmethod
-    def enrich(cls, book):
+    def prepare(cls, book):
         logger = logging.getLogger(__name__)
-        logger.info("BEGIN Html Enrichment {} items.".format(len(book.content)))
-        cls.parse(book)
-        cls.createDAG(book)
-        cls.populateContent(book)
-        cls.createOrder(book)
-        cls.print(book)
-        logger.info("BEGIN Html Enrichment {} items.".format(len(book.content)))
+        logger.info("BEGIN Prepare EPUB.")
+        cls.localize_url(book)
+        logger.info("END Prepare EPUB.")
 
     @classmethod
-    def parse(cls, book):
-        logger = logging.getLogger(__name__)
+    def localize_url(cls, book):
+        #logger = logging.getLogger(__name__)
         for item in book.content.values():
-            if item.content_type == 'text/html':
-                logger.info("Parsing {} {}".format(item.content_type, item.url))
-                item.soup = BeautifulSoup(item.payload, "lxml")
-                if hasattr(item.soup, 'title') and item.soup.title:
-                    item.title = item.soup.title.string
-                else:
-                    logger.info("No title for {}".format(item.url))
+            if hasattr(item, 'remove'):
+                continue
+            category = item.content_type.split("/")[0]
+            if category != 'text':
+                cls._moveTo(book,item,category)
             else:
-                logger.info("Skipping {} {}".format(item.content_type, item.url))
+                cls._moveTo(book,item,"")
+
+    @classmethod
+    def _moveTo(cls, book, item, category):
+        logger = logging.getLogger(__name__)
+        parsed_url= urlparse.urlsplit(item.url)
+        file_name = os.path.basename(parsed_url.path)
+        if category:
+            new_url = category + "/" + file_name 
+        else:       
+            new_url = file_name 
+        if item.url != new_url \
+            and new_url in book.content:
+                new_url = cls._findUniqueName(book, category, file_name)
+
+        logger.info("Renaming {} -> {}"
+                    .format(item.url, new_url))
+
+        for dependant in item.needed_by:
+            if hasattr(dependant, 'soup'):
+                base_link = urlparse.urlsplit(dependant.url)
+                base_link.path = os.path.dirname(base_link.path)
+                for a in dependant.soup.find_all('a'):
+                    if cls._getAbsoluteUrl(base_link, a.attr.href) == item.url:
+                        a.attr.href = new_url
+                for img in dependant.soup.find_all('img'):
+                    if cls._getAbsoluteUrl(base_link, img.attr.src) == item.url:
+                        img.attrs.src = new_url
+        item.url = new_url
+
+    @classmethod
+    def _getAbsoluteUrl(cls, base_link, link):
+        parsed = urlparse.urlsplit(link)
+        if parsed.netloc is None:
+            parsed.scheme = base_link.scheme 
+            parsed.netloc = base_link.netloc
+        if  parsed.path[0] != '/':
+            parsed.path = base_link.path + '/' + href.path
+        return \
+            urlparse.SplitResult(parsed.scheme,
+                                parsed.netloc,
+                                parsed.path,
+                                parsed.query,
+                                None).geturl()
+
+    @classmethod
+    def _findUniqueName(cls, book, category, filename):
+        i = 0
+        file_name_base, file_ext = os.path.splitext(filename)
+        while True:
+            i+=1
+            if category:
+                new_url = category + '/' + file_name_base + '_' + i + file_ext
+            else: 
+                new_url = file_name_base + '_' + i + file_ext
+            if new_url not in book.content:
+                break 
+        return new_url
 
     @classmethod
     def createDAG(cls, book):
@@ -39,28 +91,9 @@ class EnrichHtml(object):
             if item.soup is not None:
                 logger.info("Create DAG {}".format(item.url))
 
-                my_url = urlparse.urlsplit(item.url)
-
-                for link in item.soup.find_all('a'):
+                links = item.soup.find_all('a')
+                for link in links:
                     href = link.get('href')
-                    if not href:
-                        continue
-                    parsed_href = urlparse.urlsplit(href)
-                    url = \
-                        urlparse.SplitResult(parsed_href.scheme,
-                                            parsed_href.netloc,
-                                            parsed_href.path,
-                                            parsed_href.query,
-                                            None).geturl()
-
-                    if url in book.content:
-                        book.content[url].needed_by.add(item.url)
-                        item.needs.add(url)
-                    elif href:
-                        logger.info("   refered but no item exist: {}".format(url))
-
-                for link in item.soup.find_all('img'):
-                    href = link.get('src')
                     if not href:
                         continue
                     parsed_href = urlparse.urlsplit(href)
